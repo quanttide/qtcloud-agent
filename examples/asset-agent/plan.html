@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上下文规划</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+  .nav {
+    display: flex; gap: 0;
+    border-bottom: 1px solid #334155;
+    margin-bottom: 24px;
+  }
+  .nav a {
+    padding: 10px 24px;
+    color: #64748b;
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .nav a:hover { color: #e2e8f0; }
+  .nav a.active { color: #fbbf24; border-bottom-color: #fbbf24; }
+
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 20px; }
+
+  .plan-layout { display: flex; gap: 20px; }
+
+  /* tree panel */
+  .plan-tree {
+    width: 280px; flex-shrink: 0;
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 10px; padding: 16px;
+    height: fit-content;
+  }
+  .plan-tree h3 { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+  .tree-node { padding: 3px 0; font-size: 13px; }
+  .tree-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; color: #e2e8f0;
+    transition: color 0.1s;
+  }
+  .tree-label:hover { color: #fbbf24; }
+  .tree-label.selected { color: #fbbf24; }
+  .tree-tag {
+    display: inline-block;
+    background: #334155; color: #94a3b8;
+    padding: 1px 8px; border-radius: 3px;
+    font-size: 11px;
+  }
+  .tree-tag.assigned { background: #7c3aed; color: #e2e8f0; }
+  .tree-children { padding-left: 20px; }
+
+  /* config panel */
+  .plan-config {
+    flex: 1;
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 10px; padding: 20px;
+    height: fit-content;
+  }
+  .plan-config h3 {
+    font-size: 15px; font-weight: 600; margin-bottom: 4px;
+  }
+  .plan-config .sub {
+    font-size: 12px; color: #64748b; margin-bottom: 16px;
+  }
+
+  .config-section {
+    margin-bottom: 20px;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 16px;
+  }
+  .config-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .config-section h4 {
+    font-size: 13px; color: #94a3b8; font-weight: 500;
+    margin-bottom: 8px;
+  }
+
+  .rule-list { display: flex; flex-direction: column; gap: 4px; }
+  .rule-item {
+    display: flex; align-items: center; gap: 8px;
+    background: #0f172a; border: 1px solid #334155;
+    border-radius: 4px; padding: 6px 10px;
+    font-family: monospace; font-size: 13px;
+  }
+  .rule-item .del {
+    cursor: pointer; color: #ef4444;
+    font-size: 16px; line-height: 1;
+    margin-left: auto;
+    opacity: 0.6; user-select: none;
+  }
+  .rule-item .del:hover { opacity: 1; }
+
+  .btn-add {
+    background: transparent; border: 1px dashed #475569;
+    color: #64748b; padding: 5px 12px; border-radius: 4px;
+    cursor: pointer; font-size: 13px; margin-top: 4px;
+  }
+  .btn-add:hover { color: #e2e8f0; border-color: #64748b; }
+
+  .preview-toggle {
+    color: #3b82f6; cursor: pointer; font-size: 13px;
+    display: inline-block; margin-top: 6px;
+  }
+  .preview-toggle:hover { color: #60a5fa; }
+
+  .preview-box {
+    display: none;
+    background: #0f172a; border: 1px solid #334155;
+    border-radius: 6px; padding: 12px 16px;
+    margin-top: 8px;
+  }
+  .preview-box.open { display: block; }
+  .preview-file {
+    padding: 2px 0; font-family: monospace; font-size: 13px; color: #94a3b8;
+  }
+  .preview-sum {
+    color: #64748b; margin-top: 8px; font-size: 12px;
+    padding-top: 8px; border-top: 1px solid #334155;
+  }
+
+  .btn-save {
+    background: #7c3aed; color: #fff;
+    border: none; padding: 8px 24px; border-radius: 6px;
+    cursor: pointer; font-size: 13px; font-weight: 500;
+  }
+  .btn-save:hover { background: #6d28d9; }
+
+  .toast {
+    display: none;
+    background: #065f46; color: #d1fae5;
+    padding: 8px 16px; border-radius: 6px;
+    font-size: 13px; margin-top: 12px;
+  }
+  .toast.show { display: inline-block; }
+
+  @media (max-width: 640px) {
+    .plan-layout { flex-direction: column; }
+    .plan-tree { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav">
+    <a href="audit.html">📋 审计</a>
+    <a href="plan.html" class="active">✏️ 规划</a>
+  </div>
+
+  <h1>上下文规划</h1>
+
+  <div class="plan-layout">
+
+    <div class="plan-tree">
+      <h3>项目结构</h3>
+
+      <div class="tree-node">
+        <div class="tree-label">
+          📁 元仓库 <span class="tree-tag assigned">meta-agent</span>
+        </div>
+        <div class="tree-children">
+          <div class="tree-node">
+            <div class="tree-label">
+              📁 平台 <span class="tree-tag assigned">platform-agent</span>
+            </div>
+            <div class="tree-children">
+              <div class="tree-node">
+                <div class="tree-label" data-agent="drd-agent">
+                  📁 docs/drd <span class="tree-tag assigned">drd-agent</span>
+                </div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-label selected" data-agent="qa-agent">
+                  📁 docs/qa <span class="tree-tag assigned">qa-agent</span>
+                </div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-label" data-agent="code-agent">
+                  📁 src <span class="tree-tag assigned">code-agent</span>
+                </div>
+              </div>
+              <div class="tree-node">
+                <div class="tree-label" data-agent="test-agent">
+                  📁 test <span class="tree-tag assigned">test-agent</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tree-node">
+            <div class="tree-label">
+              📁 示例 <span class="tree-tag assigned">demo-agent</span>
+            </div>
+          </div>
+          <div class="tree-node">
+            <div class="tree-label">
+              📁 库 <span class="tree-tag assigned">lib-agent</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="plan-config" id="plan-config">
+      <h3 id="config-agent-name">qa-agent</h3>
+      <div class="sub">上下文边界配置</div>
+
+      <div class="config-section">
+        <h4>包含规则（watch 路径）</h4>
+        <div class="rule-list" id="rule-list">
+          <div class="rule-item">
+            <span>平台/docs/qa/*.md</span>
+            <span class="del" onclick="removeRule(this)">×</span>
+          </div>
+          <div class="rule-item">
+            <span>平台/docs/qa/.events/*.json</span>
+            <span class="del" onclick="removeRule(this)">×</span>
+          </div>
+        </div>
+        <button class="btn-add" onclick="addRule()">+ 添加规则</button>
+      </div>
+
+      <div class="config-section">
+        <h4>边界预览</h4>
+        <div class="preview-toggle" onclick="togglePreview()">▸ 展开边界内文件列表</div>
+        <div class="preview-box" id="preview-box">
+          <div class="preview-file">📄 平台/docs/qa/QA-反馈-20260516.md</div>
+          <div class="preview-file">📄 平台/docs/qa/QA-报告-20260515.md</div>
+          <div class="preview-file">📄 平台/docs/qa/QA-检查清单.md</div>
+          <div class="preview-file">📄 平台/docs/qa/.events/evt-001.json</div>
+          <div class="preview-file">📄 平台/docs/qa/.events/evt-002.json</div>
+          <div class="preview-sum">总文件数: 12</div>
+        </div>
+      </div>
+
+      <div>
+        <button class="btn-save" onclick="saveConfig()">保存</button>
+        <div class="toast" id="toast">配置已保存</div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script src="plan-data.js"></script>
+<script>
+
+function switchAgent(agent) {
+  document.getElementById("config-agent-name").textContent = agent;
+
+  const cfg = agentConfigs[agent] || { rules: [], preview: [], count: 0, tokens: "~0K" };
+
+  const list = document.getElementById("rule-list");
+  list.innerHTML = cfg.rules.map(r =>
+    `<div class="rule-item"><span>${r}</span><span class="del" onclick="removeRule(this)">×</span></div>`
+  ).join("");
+
+  const box = document.getElementById("preview-box");
+  box.innerHTML = cfg.preview.map(f =>
+    `<div class="preview-file">${f}</div>`
+  ).join("") + `          <div class="preview-sum">总文件数: ${cfg.count}</div>`;
+  box.classList.remove("open");
+
+  document.querySelectorAll("[data-agent]").forEach(el => {
+    el.classList.remove("selected");
+  });
+  const sel = document.querySelector(`[data-agent="${agent}"]`);
+  if (sel) sel.classList.add("selected");
+
+  document.getElementById("toast").classList.remove("show");
+}
+
+document.querySelectorAll("[data-agent]").forEach(el => {
+  el.addEventListener("click", function() {
+    switchAgent(this.dataset.agent);
+  });
+});
+
+function addRule() {
+  const list = document.getElementById("rule-list");
+  const item = document.createElement("div");
+  item.className = "rule-item";
+  item.innerHTML = `<span>新路径/*</span><span class="del" onclick="removeRule(this)">×</span>`;
+  list.appendChild(item);
+}
+
+function removeRule(el) {
+  el.parentElement.remove();
+}
+
+function togglePreview() {
+  document.getElementById("preview-box").classList.toggle("open");
+}
+
+function saveConfig() {
+  const toast = document.getElementById("toast");
+  toast.classList.remove("show");
+  void toast.offsetWidth;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 2000);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent 上下文管理壳</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+  /* tabs */
+  .tabs {
+    display: flex; gap: 0;
+    border-bottom: 1px solid #334155;
+    margin-bottom: 24px;
+  }
+  .tab {
+    padding: 10px 24px;
+    cursor: pointer;
+    color: #64748b;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .tab:hover { color: #e2e8f0; }
+  .tab.active { color: #fbbf24; border-bottom-color: #fbbf24; }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  /* filter bar */
+  .filter-bar {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .filter-bar label { color: #94a3b8; font-size: 13px; }
+  .filter-bar select {
+    background: #1e293b; color: #e2e8f0;
+    border: 1px solid #334155; border-radius: 6px;
+    padding: 6px 12px; font-size: 13px;
+  }
+
+  /* audit entry */
+  .entry {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .entry:hover { border-color: #475569; }
+  .entry.warn { border-color: #a16207; }
+  .entry.violation { border-color: #991b1b; }
+
+  .entry-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 8px;
+  }
+  .entry-time { color: #94a3b8; font-size: 13px; font-family: monospace; }
+  .entry-agent {
+    background: #334155; color: #f1f5f9;
+    padding: 2px 10px; border-radius: 4px;
+    font-size: 12px; font-weight: 600;
+  }
+  .entry-tokens {
+    margin-left: auto; color: #94a3b8; font-size: 13px;
+  }
+  .entry-trigger { color: #64748b; font-size: 13px; margin-bottom: 10px; }
+  .entry-badge {
+    display: inline-block;
+    background: #a16207; color: #fef9c3;
+    padding: 1px 8px; border-radius: 3px;
+    font-size: 11px; font-weight: 600;
+    margin-left: 8px;
+  }
+  .entry-badge.red { background: #991b1b; color: #fecaca; }
+
+  /* file list */
+  .file-list { margin: 8px 0 6px; }
+  .file-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0;
+    font-size: 13px;
+    font-family: monospace;
+  }
+  .file-icon { font-size: 14px; }
+  .file-name { color: #e2e8f0; flex: 1; }
+  .file-tokens { color: #64748b; width: 60px; text-align: right; }
+  .file-status { width: 20px; text-align: center; }
+  .file-status.ok { color: #22c55e; }
+  .file-status.waste { color: #ef4444; }
+  .file-status.low { color: #eab308; }
+
+  .entry-footer {
+    display: flex; gap: 16px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid #334155;
+    font-size: 12px; color: #64748b;
+  }
+  .entry-footer .val { color: #e2e8f0; }
+
+  .entry-expand {
+    display: none;
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid #334155;
+  }
+  .entry.expanded .entry-expand { display: block; }
+
+  .event-json {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #94a3b8;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .event-json .key { color: #c084fc; }
+  .event-json .str { color: #22c55e; }
+  .event-json .num { color: #facc15; }
+  .event-json .bool { color: #f472b6; }
+
+  /* planning page */
+  .plan-layout { display: flex; gap: 20px; }
+  .plan-tree {
+    width: 280px; flex-shrink: 0;
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 10px; padding: 16px;
+  }
+  .plan-tree h3 { font-size: 13px; color: #94a3b8; margin-bottom: 12px; }
+  .tree-node { padding: 3px 0; font-size: 13px; }
+  .tree-node .label { color: #e2e8f0; cursor: pointer; }
+  .tree-node .label:hover { color: #fbbf24; }
+  .tree-node .tag {
+    display: inline-block;
+    background: #334155; color: #94a3b8;
+    padding: 1px 8px; border-radius: 3px;
+    font-size: 11px; margin-left: 6px;
+  }
+  .tree-node .tag.active { background: #7c3aed; color: #e2e8f0; }
+  .tree-children { padding-left: 20px; }
+
+  .plan-config {
+    flex: 1;
+    background: #1e293b; border: 1px solid #334155;
+    border-radius: 10px; padding: 20px;
+  }
+  .plan-config h3 { font-size: 13px; color: #94a3b8; margin-bottom: 16px; }
+  .config-row { margin-bottom: 14px; }
+  .config-row label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; }
+  .rule-list { display: flex; flex-direction: column; gap: 4px; }
+  .rule-item {
+    display: flex; align-items: center; gap: 8px;
+    background: #0f172a; border: 1px solid #334155;
+    border-radius: 4px; padding: 6px 10px;
+    font-family: monospace; font-size: 13px;
+  }
+  .rule-item .del {
+    cursor: pointer; color: #ef4444;
+    font-size: 16px; line-height: 1;
+    margin-left: auto;
+    opacity: 0.6;
+  }
+  .rule-item .del:hover { opacity: 1; }
+  .btn-add {
+    background: transparent; border: 1px dashed #475569;
+    color: #64748b; padding: 6px 12px; border-radius: 4px;
+    cursor: pointer; font-size: 13px; margin-top: 4px;
+  }
+  .btn-add:hover { color: #e2e8f0; border-color: #64748b; }
+  .btn-save {
+    background: #7c3aed; color: #fff;
+    border: none; padding: 8px 20px; border-radius: 6px;
+    cursor: pointer; font-size: 13px; font-weight: 500;
+    margin-top: 12px;
+  }
+  .btn-save:hover { background: #6d28d9; }
+
+  .preview-toggle {
+    color: #3b82f6; cursor: pointer; font-size: 13px;
+    margin-top: 8px; display: inline-block;
+  }
+  .preview-toggle:hover { color: #60a5fa; }
+  .preview-box {
+    display: none;
+    background: #0f172a; border: 1px solid #334155;
+    border-radius: 6px; padding: 12px 16px;
+    margin-top: 8px; font-size: 13px;
+  }
+  .preview-box.open { display: block; }
+  .preview-box .pfile { padding: 2px 0; font-family: monospace; color: #94a3b8; }
+  .preview-box .psum { color: #64748b; margin-top: 6px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="tabs">
+    <div class="tab active" data-tab="audit">📋 审计</div>
+    <div class="tab" data-tab="plan">✏️ 规划</div>
+  </div>
+
+  <!-- ========== Audit Page ========== -->
+  <div class="page active" id="page-audit">
+
+    <div class="filter-bar">
+      <label for="agent-filter">Agent</label>
+      <select id="agent-filter">
+        <option value="all">全部</option>
+        <option value="drd-agent">drd-agent</option>
+        <option value="qa-agent">qa-agent</option>
+        <option value="code-agent">code-agent</option>
+      </select>
+    </div>
+
+    <div id="audit-list"></div>
+
+  </div>
+
+  <!-- ========== Planning Page ========== -->
+  <div class="page" id="page-plan">
+
+    <div class="plan-layout">
+      <div class="plan-tree">
+        <h3>项目结构</h3>
+        <div class="tree-node">
+          <span class="label">📁 元仓库</span><span class="tag">meta-agent</span>
+          <div class="tree-children">
+            <div class="tree-node">
+              <span class="label">📁 平台</span><span class="tag">platform-agent</span>
+              <div class="tree-children">
+                <div class="tree-node" data-agent="drd-agent">
+                  <span class="label">📁 docs/drd</span><span class="tag active">drd-agent</span>
+                </div>
+                <div class="tree-node" data-agent="qa-agent">
+                  <span class="label">📁 docs/qa</span><span class="tag active">qa-agent</span>
+                </div>
+                <div class="tree-node" data-agent="code-agent">
+                  <span class="label">📁 src</span><span class="tag active">code-agent</span>
+                </div>
+                <div class="tree-node" data-agent="test-agent">
+                  <span class="label">📁 test</span><span class="tag active">test-agent</span>
+                </div>
+              </div>
+            </div>
+            <div class="tree-node">
+              <span class="label">📁 库</span><span class="tag">lib-agent</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="plan-config" id="plan-config">
+        <h3><span id="config-agent-name">qa-agent</span> 上下文边界</h3>
+
+        <div class="config-row">
+          <label>包含规则（watch 路径）</label>
+          <div class="rule-list" id="rule-list">
+            <div class="rule-item">
+              <span>平台/docs/qa/*.md</span>
+              <span class="del" onclick="removeRule(this)">×</span>
+            </div>
+            <div class="rule-item">
+              <span>平台/docs/qa/.events/*.json</span>
+              <span class="del" onclick="removeRule(this)">×</span>
+            </div>
+          </div>
+          <button class="btn-add" onclick="addRule()">+ 添加规则</button>
+        </div>
+
+        <div class="preview-toggle" onclick="togglePreview()">▸ 预览边界内文件</div>
+        <div class="preview-box" id="preview-box">
+          <div class="pfile">📄 平台/docs/qa/QA-反馈-20260516.md</div>
+          <div class="pfile">📄 平台/docs/qa/QA-报告-20260515.md</div>
+          <div class="pfile">📄 平台/docs/qa/QA-检查清单.md</div>
+          <div class="pfile">📄 平台/docs/qa/.events/evt-001.json</div>
+          <div class="pfile">📄 平台/docs/qa/.events/evt-002.json</div>
+          <div class="psum">总文件数: 12  |  预估 token: ~18K</div>
+        </div>
+
+        <button class="btn-save" onclick="saveConfig()">保存</button>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// sample data
+const auditData = [
+  {
+    time: "14:30:05", agent: "drd-agent", tokens: 8230,
+    trigger: "平台/docs/drd/支付设计.md (finalized)",
+    files: [
+      { icon: "📄", name: "支付设计.md", tokens: 3200, status: "ok" },
+      { icon: "📄", name: "架构决策.md", tokens: 1800, status: "ok" },
+      { icon: "📄", name: "drd-rules.yaml", tokens: 930, status: "ok" },
+      { icon: "📄", name: "平台技术选型.md", tokens: 2300, status: "waste" },
+    ],
+    eventData: "2,300", boundary: "✅",
+    json: `{\n  "id": "evt-20260516-001",\n  "type": "drd.finalized",\n  "source": "/平台/docs/drd",\n  "subject": "支付设计.md",\n  "data": {\n    "status": "final",\n    "summary": "支付服务采用策略模式，支持微信/支付宝/银联",\n    "key_decisions": ["策略模式", "异步对账", "T+1 结算"]\n  }\n}`,
+    wasteRate: 38
+  },
+  {
+    time: "14:28:12", agent: "qa-agent", tokens: 12450,
+    trigger: "事件 data (design.change.request)",
+    files: [
+      { icon: "📄", name: "QA-反馈.md", tokens: 2100, status: "ok" },
+      { icon: "📨", name: "事件 data", tokens: 1400, status: "ok" },
+      { icon: "📄", name: "支付设计.md", tokens: 4200, status: "waste" },
+      { icon: "📄", name: "账户体系设计.md", tokens: 3800, status: "waste" },
+    ],
+    eventData: "1,400", boundary: "🔴 尝试加载平台/src/main.py 被拒绝",
+    json: `{\n  "id": "evt-20260516-002",\n  "type": "design.change.request",\n  "source": "/平台/docs/qa",\n  "subject": "QA-反馈.md",\n  "data": {\n    "issue": "支付设计的对账时序图缺少失败分支",\n    "severity": "major",\n    "suggestion": "补充异常重试和最终一致性说明",\n    "related_doc": "/平台/docs/drd/支付设计.md"\n  }\n}`,
+    wasteRate: 67,
+    warn: true,
+    violation: true
+  },
+  {
+    time: "14:15:33", agent: "drd-agent", tokens: 5620,
+    trigger: "平台/docs/drd/架构决策.md (created)",
+    files: [
+      { icon: "📄", name: "架构决策.md", tokens: 2800, status: "ok" },
+      { icon: "📄", name: "drd-template.md", tokens: 1500, status: "low" },
+      { icon: "📄", name: "drd-rules.yaml", tokens: 820, status: "ok" },
+    ],
+    eventData: "1,200", boundary: "✅",
+    json: `{\n  "id": "evt-20260516-003",\n  "type": "drd.created",\n  "source": "/平台/docs/drd",\n  "subject": "架构决策.md",\n  "data": {\n    "status": "draft",\n    "summary": "支付服务决策记录"\n  }\n}`,
+    wasteRate: 27
+  },
+];
+
+let currentAgent = "all";
+
+function renderAudit() {
+  const list = document.getElementById("audit-list");
+  const filtered = currentAgent === "all"
+    ? auditData
+    : auditData.filter(e => e.agent === currentAgent);
+
+  list.innerHTML = filtered.map(e => {
+    const cls = e.violation ? "entry violation" : e.warn ? "entry warn" : "entry";
+    const statusIcon = s => s === "ok" ? '<span class="file-status ok">✓</span>'
+      : s === "waste" ? '<span class="file-status waste">✗</span>'
+      : '<span class="file-status low">⚡</span>';
+
+    const filesHtml = e.files.map(f =>
+      `<div class="file-item">
+        <span class="file-icon">${f.icon}</span>
+        <span class="file-name">${f.name}</span>
+        <span class="file-tokens">${f.tokens.toLocaleString()}</span>
+        ${statusIcon(f.status)}
+      </div>`
+    ).join("");
+
+    const warnBadge = e.warn ? '<span class="entry-badge">浪费超 50%</span>' : "";
+    const violBadge = e.violation ? '<span class="entry-badge red">越权</span>' : "";
+
+    return `<div class="${cls}" onclick="toggleEntry(this)">
+      <div class="entry-header">
+        <span class="entry-time">${e.time}</span>
+        <span class="entry-agent">${e.agent}</span>
+        ${warnBadge}${violBadge}
+        <span class="entry-tokens">${e.tokens.toLocaleString()} token</span>
+      </div>
+      <div class="entry-trigger">触发: ${e.trigger}</div>
+      <div class="file-list">${filesHtml}</div>
+      <div class="entry-footer">
+        <span>事件 data: <span class="val">${e.eventData}</span></span>
+        <span>边界检查: <span class="val">${e.boundary}</span></span>
+      </div>
+      <div class="entry-expand">
+        <div class="event-json">${highlightJson(e.json)}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleEntry(el) {
+  el.classList.toggle("expanded");
+}
+
+function highlightJson(str) {
+  return str.replace(/("(?:[^"\\]|\\.)*")/g, '<span class="str">$1</span>')
+    .replace(/\b(\d+)\b/g, '<span class="num">$1</span>')
+    .replace(/\b(true|false)\b/g, '<span class="bool">$1</span>')
+    .replace(/\b(id|type|source|subject|data|status|summary|key_decisions|issue|severity|suggestion|related_doc)\b/g, '<span class="key">$1</span>');
+}
+
+document.getElementById("agent-filter").addEventListener("change", function() {
+  currentAgent = this.value;
+  renderAudit();
+});
+
+// tabs
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", function() {
+    document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+    this.classList.add("active");
+    document.getElementById("page-" + this.dataset.tab).classList.add("active");
+  });
+});
+
+// planning page tree selection
+document.querySelectorAll("[data-agent]").forEach(el => {
+  el.addEventListener("click", function() {
+    const agent = this.dataset.agent;
+    document.getElementById("config-agent-name").textContent = agent;
+    const rules = {
+      "drd-agent": ["平台/docs/drd/*.md", "平台/docs/drd/.events/*.json"],
+      "qa-agent": ["平台/docs/qa/*.md", "平台/docs/qa/.events/*.json"],
+      "code-agent": ["平台/src/*.py", "平台/src/.events/*.json"],
+      "test-agent": ["平台/test/*.py", "平台/test/.events/*.json"],
+    };
+    const ruleList = document.getElementById("rule-list");
+    ruleList.innerHTML = (rules[agent] || ["暂无规则"]).map(r =>
+      `<div class="rule-item"><span>${r}</span><span class="del" onclick="removeRule(this)">×</span></div>`
+    ).join("");
+    document.getElementById("preview-box").classList.remove("open");
+  });
+});
+
+function addRule() {
+  const list = document.getElementById("rule-list");
+  const item = document.createElement("div");
+  item.className = "rule-item";
+  item.innerHTML = `<span>新路径/*</span><span class="del" onclick="removeRule(this)">×</span>`;
+  list.appendChild(item);
+}
+
+function removeRule(el) {
+  el.parentElement.remove();
+}
+
+function togglePreview() {
+  document.getElementById("preview-box").classList.toggle("open");
+}
+
+function saveConfig() {
+  alert("配置已保存（模拟）");
+}
+
+renderAudit();
+</script>
+</body>
+</html>

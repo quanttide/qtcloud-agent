@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>上下文审计</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 24px 20px; }
+
+  .nav {
+    display: flex; gap: 0;
+    border-bottom: 1px solid #334155;
+    margin-bottom: 24px;
+  }
+  .nav a {
+    padding: 10px 24px;
+    color: #64748b;
+    font-weight: 500;
+    text-decoration: none;
+    border-bottom: 2px solid transparent;
+  }
+  .nav a:hover { color: #e2e8f0; }
+  .nav a.active { color: #fbbf24; border-bottom-color: #fbbf24; }
+
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 20px; }
+
+  .filter-bar {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .filter-bar label { color: #94a3b8; font-size: 13px; }
+  .filter-bar select {
+    background: #1e293b; color: #e2e8f0;
+    border: 1px solid #334155; border-radius: 6px;
+    padding: 6px 12px; font-size: 13px;
+  }
+
+  .entry {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .entry:hover { border-color: #475569; }
+  .entry.warn { border-color: #a16207; }
+  .entry.violation { border-color: #991b1b; }
+
+  .entry-header {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 8px;
+  }
+  .entry-time { color: #94a3b8; font-size: 13px; font-family: monospace; }
+  .entry-agent {
+    background: #334155; color: #f1f5f9;
+    padding: 2px 10px; border-radius: 4px;
+    font-size: 12px; font-weight: 600;
+  }
+  .entry-tokens {
+    margin-left: auto; color: #94a3b8; font-size: 13px;
+  }
+  .entry-trigger { color: #64748b; font-size: 13px; margin-bottom: 10px; }
+  .entry-badge {
+    display: inline-block;
+    background: #a16207; color: #fef9c3;
+    padding: 1px 8px; border-radius: 3px;
+    font-size: 11px; font-weight: 600;
+    margin-left: 8px;
+  }
+  .entry-badge.red { background: #991b1b; color: #fecaca; }
+
+  .file-list { margin: 8px 0 6px; }
+  .file-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0;
+    font-size: 13px;
+    font-family: monospace;
+  }
+  .file-icon { font-size: 14px; }
+  .file-name { color: #e2e8f0; flex: 1; }
+  .file-tokens { color: #64748b; width: 60px; text-align: right; }
+  .file-status { width: 20px; text-align: center; }
+  .file-status.ok { color: #22c55e; }
+  .file-status.waste { color: #ef4444; }
+  .file-status.low { color: #eab308; }
+
+  .entry-footer {
+    display: flex; gap: 16px;
+    margin-top: 8px; padding-top: 8px;
+    border-top: 1px solid #334155;
+    font-size: 12px; color: #64748b;
+  }
+  .entry-footer .val { color: #e2e8f0; }
+
+  .entry-expand { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px solid #334155; }
+  .entry.expanded .entry-expand { display: block; }
+
+  .event-json {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #94a3b8;
+    white-space: pre-wrap;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .event-json .key { color: #c084fc; }
+  .event-json .str { color: #22c55e; }
+  .event-json .num { color: #facc15; }
+
+  .empty { color: #64748b; text-align: center; padding: 40px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="nav">
+    <a href="audit.html" class="active">📋 审计</a>
+    <a href="plan.html">✏️ 规划</a>
+  </div>
+
+  <h1>上下文审计</h1>
+
+  <div class="filter-bar">
+    <label for="agent-filter">Agent</label>
+    <select id="agent-filter">
+      <option value="all">全部</option>
+      <option value="drd-agent">drd-agent</option>
+      <option value="qa-agent">qa-agent</option>
+      <option value="code-agent">code-agent</option>
+    </select>
+  </div>
+
+  <div id="audit-list"></div>
+
+</div>
+
+<script src="audit-data.js"></script>
+<script>
+
+let currentAgent = "all";
+
+function renderAudit() {
+  const list = document.getElementById("audit-list");
+  const filtered = currentAgent === "all"
+    ? auditData
+    : auditData.filter(e => e.agent === currentAgent);
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty">该 Agent 暂无调用记录</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(e => {
+    const cls = e.violation ? "entry violation" : e.warn ? "entry warn" : "entry";
+    const statusIcon = s => s === "ok" ? '<span class="file-status ok">✓</span>'
+      : s === "waste" ? '<span class="file-status waste">✗</span>'
+      : '<span class="file-status low">⚡</span>';
+
+    const filesHtml = e.files.map(f =>
+      `<div class="file-item">
+        <span class="file-icon">${f.icon}</span>
+        <span class="file-name">${f.name}</span>
+        <span class="file-tokens">${f.tokens.toLocaleString()}</span>
+        ${statusIcon(f.status)}
+      </div>`
+    ).join("");
+
+    const warnBadge = e.warn ? '<span class="entry-badge">浪费超 50%</span>' : "";
+    const violBadge = e.violation ? '<span class="entry-badge red">越权</span>' : "";
+
+    return `<div class="${cls}" onclick="toggleEntry(this)">
+      <div class="entry-header">
+        <span class="entry-time">${e.time}</span>
+        <span class="entry-agent">${e.agent}</span>
+        ${warnBadge}${violBadge}
+        <span class="entry-tokens">${e.tokens.toLocaleString()} token</span>
+      </div>
+      <div class="entry-trigger">触发: ${e.trigger}</div>
+      <div class="file-list">${filesHtml}</div>
+      <div class="entry-footer">
+        <span>事件 data: <span class="val">${e.eventData}</span></span>
+        <span>边界检查: <span class="val">${e.boundary}</span></span>
+      </div>
+      <div class="entry-expand">
+        <div class="event-json">${highlightJson(e.json)}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleEntry(el) {
+  el.classList.toggle("expanded");
+}
+
+function highlightJson(str) {
+  return str
+    .replace(/("(?:[^"\\]|\\.)*")/g, '<span class="str">$1</span>')
+    .replace(/\b(\d+)\b/g, '<span class="num">$1</span>')
+    .replace(/\b(id|type|source|subject|data|status|summary|key_decisions|issue|severity|suggestion|related_doc)\b/g, '<span class="key">$1</span>');
+}
+
+document.getElementById("agent-filter").addEventListener("change", function() {
+  currentAgent = this.value;
+  renderAudit();
+});
+
+renderAudit();
+</script>
+</body>
+</html>
