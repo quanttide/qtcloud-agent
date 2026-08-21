@@ -1,2 +1,4 @@
-/src/studio/build/
 /src/cli/target/
+/src/studio/build/
+/src/site/node_modules/
+/src/site/dist/
