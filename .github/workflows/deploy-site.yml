@@ -46,6 +46,7 @@ jobs:
             -var environment=prod \
             -var oss_bucket_name=qtcloud-agent-site \
             -var image=placeholder \
+            -target=alicloud_oss_bucket.site \
             -target=alicloud_oss_bucket.studio \
             -target=alicloud_cdn_domain_new.studio \
             -target=alicloud_cdn_domain_config.studio_private_back \
