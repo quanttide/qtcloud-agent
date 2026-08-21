@@ -1,5 +1,11 @@
 // qtcloud-agent provider：量潮智能体云服务端（注册中心 + 会话 API）
-// 数据源：注册中心（QTCLOUD_AGENT_REGISTRY，默认 data/profile）+ DSH 数据目录（DSH_HOME，默认 ~/.dsh）
+//
+// 数据源兼容本地与云端（QTCLOUD_AGENT_STORE）：
+//
+//	local（默认）— 直读本地文件系统（第二大脑 git 仓库 / ~/.dsh），本地测试友好
+//	oss          — 阿里云 OSS（多端共享），凭证见 store.NewOSSStoreFromEnv
+//
+// 数据路径：注册中心（QTCLOUD_AGENT_REGISTRY，默认 data/profile）+ DSH（DSH_HOME，默认 ~/.dsh）
 package main
 
 import (
@@ -26,9 +32,22 @@ func main() {
 		}
 	}
 
-	// 数据源：本地文件系统（未来可切换 OSSStore）
-	agentStore := store.NewLocalStore(registry)
-	sessionStore := store.NewLocalStore(dshHome)
+	var agentStore store.Store
+	var sessionStore store.Store
+	switch os.Getenv("QTCLOUD_AGENT_STORE") {
+	case "oss":
+		ossStore, err := store.NewOSSStoreFromEnv()
+		if err != nil {
+			log.Fatalf("OSS 数据源初始化失败：%v", err)
+		}
+		agentStore = ossStore
+		sessionStore = ossStore
+		log.Printf("数据源：OSS（bucket=%s）", os.Getenv("ALIYUN_OSS_BUCKET"))
+	default:
+		agentStore = store.NewLocalStore(registry)
+		sessionStore = store.NewLocalStore(dshHome)
+		log.Printf("数据源：本地（registry=%s, dsh=%s）", registry, dshHome)
+	}
 
 	agentRepo := agent.NewRepository(agentStore)
 	sessionRepo := session.NewRepository(sessionStore)
@@ -47,7 +66,7 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("qtcloud-agent provider listening on %s (registry=%s, dsh=%s)", addr, agentStore.Root(), sessionStore.Root())
+	log.Printf("qtcloud-agent provider listening on %s", addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
