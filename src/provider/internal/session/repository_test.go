@@ -1,6 +1,7 @@
 package session
 
 import (
+	"github.com/quanttide/qtcloud-agent-provider/internal/store"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func TestListAll_GroupsAndCwd(t *testing.T) {
 	home := t.TempDir()
 	setupDSH(t, home)
 
-	repo := NewRepository(filepath.Join(home, ".dsh"))
+	repo := NewRepository(store.NewLocalStore(filepath.Join(home, ".dsh")))
 	groups, err := repo.ListAll()
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
@@ -86,7 +87,7 @@ func TestListAll_GroupsAndCwd(t *testing.T) {
 }
 
 func TestListAll_Empty(t *testing.T) {
-	repo := NewRepository(t.TempDir() + "/.dsh")
+	repo := NewRepository(store.NewLocalStore(t.TempDir() + "/.dsh"))
 	groups, err := repo.ListAll()
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)
@@ -108,7 +109,8 @@ func TestDirSize(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sub, "b.txt"), []byte("12345"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := dirSize(home); got != 10 {
+	repo := NewRepository(store.NewLocalStore(home))
+	if got := repo.dirSize(""); got != 10 {
 		t.Errorf("dirSize = %d, 期望 10", got)
 	}
 }

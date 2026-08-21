@@ -9,14 +9,29 @@ import (
 
 	"github.com/quanttide/qtcloud-agent-provider/internal/agent"
 	"github.com/quanttide/qtcloud-agent-provider/internal/session"
+	"github.com/quanttide/qtcloud-agent-provider/internal/store"
 )
 
 func main() {
 	registry := os.Getenv("QTCLOUD_AGENT_REGISTRY")
 	dshHome := os.Getenv("DSH_HOME")
+	if registry == "" {
+		registry = "data/profile"
+	}
+	if dshHome == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			dshHome = h + "/.dsh"
+		} else {
+			dshHome = ".dsh"
+		}
+	}
 
-	agentRepo := agent.NewRepository(registry)
-	sessionRepo := session.NewRepository(dshHome)
+	// 数据源：本地文件系统（未来可切换 OSSStore）
+	agentStore := store.NewLocalStore(registry)
+	sessionStore := store.NewLocalStore(dshHome)
+
+	agentRepo := agent.NewRepository(agentStore)
+	sessionRepo := session.NewRepository(sessionStore)
 	agentH := agent.NewHandler(agentRepo)
 	sessionH := session.NewHandler(sessionRepo)
 
@@ -32,7 +47,7 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	log.Printf("qtcloud-agent provider listening on %s (registry=%s, dsh=%s)", addr, agentRepo.RegistryPath(), sessionRepo.DSHHome())
+	log.Printf("qtcloud-agent provider listening on %s (registry=%s, dsh=%s)", addr, agentStore.Root(), sessionStore.Root())
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}

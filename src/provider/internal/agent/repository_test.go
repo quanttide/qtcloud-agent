@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"github.com/quanttide/qtcloud-agent-provider/internal/store"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,7 +44,7 @@ func TestListAll_OkAndMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo := NewRepository(registry)
+	repo := NewRepository(store.NewLocalStore(registry))
 	// 指向临时 HOME
 	t.Setenv("HOME", home)
 
@@ -96,7 +97,7 @@ func TestListAll_DiffAndMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo := NewRepository(registry)
+	repo := NewRepository(store.NewLocalStore(registry))
 	t.Setenv("HOME", home)
 
 	agents, err := repo.ListAll()
@@ -120,7 +121,7 @@ func TestListAll_DiffAndMissing(t *testing.T) {
 }
 
 func TestListAll_EmptyRegistry(t *testing.T) {
-	repo := NewRepository(t.TempDir() + "/nonexistent")
+	repo := NewRepository(store.NewLocalStore(t.TempDir() + "/nonexistent"))
 	agents, err := repo.ListAll()
 	if err != nil {
 		t.Fatalf("ListAll: %v", err)

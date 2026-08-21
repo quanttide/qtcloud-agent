@@ -3,11 +3,11 @@ package session
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/quanttide/qtcloud-agent-provider/internal/store"
 )
 
 // Item 单个会话条目
@@ -29,61 +29,46 @@ type Group struct {
 
 // Repository 会话数据访问
 type Repository struct {
-	dshHome string
+	st store.Store
 }
 
-// NewRepository 创建仓库（dshHome 默认 ~/.dsh）
-func NewRepository(dshHome string) *Repository {
-	if dshHome == "" {
-		if h, err := os.UserHomeDir(); err == nil {
-			dshHome = filepath.Join(h, ".dsh")
-		} else {
-			dshHome = ".dsh"
-		}
-	}
-	return &Repository{dshHome: dshHome}
+// NewRepository 创建仓库（st 为数据源——LocalStore 指向 DSH 数据目录，如 ~/.dsh）
+func NewRepository(st store.Store) *Repository {
+	return &Repository{st: st}
 }
-
-// DSHHome 返回数据目录
-func (r *Repository) DSHHome() string { return r.dshHome }
 
 // ListAll 读取全部会话（按工作区分组）
 func (r *Repository) ListAll() ([]Group, error) {
-	sessionsDir := filepath.Join(r.dshHome, "sessions")
-	wsEntries, err := os.ReadDir(sessionsDir)
+	wsEntries, err := r.st.ListDir("sessions")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []Group{}, nil
-		}
 		return nil, err
 	}
 
 	cwds := r.projCacheCwds()
 	var groups []Group
 	for _, ws := range wsEntries {
-		if !ws.IsDir() {
+		if !ws.IsDir {
 			continue
 		}
-		name := ws.Name()
-		wsPath := filepath.Join(sessionsDir, name)
-		sessEntries, err := os.ReadDir(wsPath)
+		name := ws.Name
+		sessEntries, err := r.st.ListDir("sessions/" + name)
 		if err != nil {
 			continue
 		}
 		var items []Item
 		var totalSize int64
 		for _, se := range sessEntries {
-			if !se.IsDir() {
+			if !se.IsDir {
 				continue
 			}
-			sid := se.Name()
+			sid := se.Name
 			item := Item{
 				ID:        sid,
-				SizeBytes: dirSize(filepath.Join(wsPath, sid)),
+				SizeBytes: r.dirSize("sessions/" + name + "/" + sid),
 				Cwd:       cwds[sid],
 			}
-			if fi, err := os.Stat(filepath.Join(wsPath, sid)); err == nil {
-				t := fi.ModTime()
+			if !se.ModTime.IsZero() {
+				t := se.ModTime
 				item.Mtime = &t
 			}
 			items = append(items, item)
@@ -102,10 +87,9 @@ func (r *Repository) ListAll() ([]Group, error) {
 	return groups, nil
 }
 
-// projCacheCwds 读取 $DSH_HOME/storages/session_projcache.json 的 /tables/sessions/{sid}/identity/cwd
+// projCacheCwds 读取 storages/session_projcache.json 的 /tables/sessions/{sid}/identity/cwd
 func (r *Repository) projCacheCwds() map[string]string {
-	p := filepath.Join(r.dshHome, "storages", "session_projcache.json")
-	raw, err := os.ReadFile(p)
+	raw, err := r.st.ReadFile("storages/session_projcache.json")
 	if err != nil {
 		return map[string]string{}
 	}
@@ -129,6 +113,23 @@ func (r *Repository) projCacheCwds() map[string]string {
 	return out
 }
 
+// dirSize 递归目录大小（通过数据源遍历）
+func (r *Repository) dirSize(path string) int64 {
+	var total int64
+	entries, err := r.st.ListDir(path)
+	if err != nil {
+		return 0
+	}
+	for _, e := range entries {
+		if e.IsDir {
+			total += r.dirSize(path + "/" + e.Name)
+		} else {
+			total += e.Size
+		}
+	}
+	return total
+}
+
 // decodeWorkspace 工作区目录名解码（对齐 CLI）：--tmp-- → 临时工作区；--path-- → 还原
 func decodeWorkspace(name string) string {
 	if name == "--tmp--" {
@@ -142,22 +143,4 @@ func decodeWorkspace(name string) string {
 		return name
 	}
 	return strings.ReplaceAll(inner, "-", "/")
-}
-
-// dirSize 递归目录大小
-func dirSize(path string) int64 {
-	var total int64
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return 0
-	}
-	for _, e := range entries {
-		p := filepath.Join(path, e.Name())
-		if e.IsDir() {
-			total += dirSize(p)
-		} else if fi, err := e.Info(); err == nil {
-			total += fi.Size()
-		}
-	}
-	return total
 }

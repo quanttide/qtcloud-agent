@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/quanttide/qtcloud-agent-provider/internal/store"
 )
 
 // FileStatus 注册文件状态
@@ -38,15 +40,12 @@ type Status struct {
 
 // Repository 注册中心数据访问
 type Repository struct {
-	registryPath string
+	st store.Store
 }
 
-// NewRepository 创建仓库（registryPath 为注册中心父目录，如 data/profile）
-func NewRepository(registryPath string) *Repository {
-	if registryPath == "" {
-		registryPath = "data/profile"
-	}
-	return &Repository{registryPath: registryPath}
+// NewRepository 创建仓库（st 为数据源——LocalStore 指向注册中心父目录，如 data/profile）
+func NewRepository(st store.Store) *Repository {
+	return &Repository{st: st}
 }
 
 // agentLocalDir 已知 Agent 本地配置目录映射（对齐 CLI agent_local_dir）
@@ -70,26 +69,19 @@ func skipFile(name string) bool {
 	return name == "README.md" || name == "LICENSE" || name == ".gitkeep"
 }
 
-// RegistryPath 返回注册中心路径
-func (r *Repository) RegistryPath() string { return r.registryPath }
-
 // ListAll 读取注册中心下所有 Agent 的状态
 func (r *Repository) ListAll() ([]Status, error) {
-	registryDir := filepath.Join(r.registryPath, "agents")
-	entries, err := os.ReadDir(registryDir)
+	entries, err := r.st.ListDir("agents")
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []Status{}, nil
-		}
 		return nil, err
 	}
 
 	var result []Status
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir {
 			continue
 		}
-		s, err := r.loadAgent(filepath.Join(registryDir, e.Name()), e.Name())
+		s, err := r.loadAgent(e.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -99,22 +91,22 @@ func (r *Repository) ListAll() ([]Status, error) {
 	return result, nil
 }
 
-func (r *Repository) loadAgent(dir, name string) (Status, error) {
+func (r *Repository) loadAgent(name string) (Status, error) {
 	localDir := agentLocalDir(name)
 	localExists := localDir != "" && isDir(localDir)
 
-	fileEntries, err := os.ReadDir(dir)
+	entries, err := r.st.ListDir("agents/" + name)
 	if err != nil {
 		return Status{}, err
 	}
 
 	var files []File
 	issueCount := 0
-	for _, e := range fileEntries {
-		if e.IsDir() {
+	for _, e := range entries {
+		if e.IsDir {
 			continue
 		}
-		fname := e.Name()
+		fname := e.Name
 		if skipFile(fname) {
 			files = append(files, File{Name: fname, Status: StatusSkip})
 			continue
@@ -130,7 +122,7 @@ func (r *Repository) loadAgent(dir, name string) (Status, error) {
 			continue
 		}
 		status := StatusDiff
-		if sameKeys(flattenJSONFile(filepath.Join(dir, fname)), flattenJSONFile(localPath)) {
+		if sameKeys(r.flattenJSON("agents/"+name+"/"+fname), flattenLocalJSON(localPath)) {
 			status = StatusOK
 		} else {
 			issueCount++
@@ -147,12 +139,25 @@ func (r *Repository) loadAgent(dir, name string) (Status, error) {
 	}, nil
 }
 
-// flattenJSONFile 读取 JSON(JSONC) 文件并展平为 key → 字符串 映射
-func flattenJSONFile(path string) map[string]string {
+// flattenJSON 从数据源读取 JSON(JSONC) 文件并展平
+func (r *Repository) flattenJSON(path string) map[string]string {
+	raw, err := r.st.ReadFile(path)
+	if err != nil {
+		return map[string]string{}
+	}
+	return flattenRaw(raw)
+}
+
+// flattenLocalJSON 读取本地配置文件并展平（对比目标）
+func flattenLocalJSON(path string) map[string]string {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return map[string]string{}
 	}
+	return flattenRaw(raw)
+}
+
+func flattenRaw(raw []byte) map[string]string {
 	cleaned := stripJSONC(string(raw))
 	var value any
 	if err := json.Unmarshal([]byte(cleaned), &value); err != nil {
@@ -180,7 +185,7 @@ func flatten(v any, prefix string, out map[string]string) {
 		}
 	case []any:
 		for i, item := range t {
-			flatten(item, prefix+"["+itoa(i)+"]", out)
+			flatten(item, prefix+"["+strconv.Itoa(i)+"]", out)
 		}
 	default:
 		out[prefix] = toStr(v)
@@ -230,8 +235,6 @@ func isFile(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
 }
-
-func itoa(i int) string { return strconv.Itoa(i) }
 
 func toStr(v any) string {
 	switch t := v.(type) {
