@@ -1,6 +1,9 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
+
+import 'models/agent.dart';
+import 'models/session.dart';
+import 'repositories/agent_repository.dart';
+import 'repositories/session_repository.dart';
 
 void main() {
   runApp(const AgentStudioApp());
@@ -22,7 +25,7 @@ class AgentStudioApp extends StatelessWidget {
   }
 }
 
-/// 应用外壳：三职能导航（注册中心 / 会话 / 配置）
+/// 应用外壳：三职能导航（会话 / 技能 / 智能体）
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
@@ -77,86 +80,7 @@ class _ShellScreenState extends State<ShellScreen> {
   }
 }
 
-// ─── 工具：调用 qtcloud-agent CLI ───
-
-/// 执行 CLI 命令并返回 stdout（找不到 CLI 时返回错误说明）
-Future<String> _runCli(List<String> args) async {
-  try {
-    final result = await Process.run('qtcloud-agent', args);
-    if (result.exitCode != 0) {
-      return '错误（exit ${result.exitCode}）：${result.stderr}';
-    }
-    return result.stdout.toString();
-  } catch (e) {
-    return '无法运行 qtcloud-agent：$e\n请确认 CLI 已安装（cargo build --release 于 src/cli）';
-  }
-}
-
-// ─── 智能体页（注册中心 vs 本地对比） ───
-
-class AgentsScreen extends StatefulWidget {
-  const AgentsScreen({super.key});
-
-  @override
-  State<AgentsScreen> createState() => _AgentsScreenState();
-}
-
-class _AgentsScreenState extends State<AgentsScreen> {
-  String _output = '加载中…';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _output = '加载中…');
-    _output = await _runCli(['status']);
-    if (mounted) setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Text('注册中心 vs 本地配置',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: '刷新',
-                onPressed: _load,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SingleChildScrollView(
-                child: SelectableText(_output,
-                    style: const TextStyle(fontFamily: 'monospace')),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── 会话页（dsh sessions） ───
+// ─── 会话页（直读 DSH 数据目录） ───
 
 class SessionsScreen extends StatefulWidget {
   const SessionsScreen({super.key});
@@ -166,70 +90,67 @@ class SessionsScreen extends StatefulWidget {
 }
 
 class _SessionsScreenState extends State<SessionsScreen> {
-  String _output = '加载中…';
+  final _repo = const SessionRepository();
+  late Future<List<SessionGroup>> _future;
 
   @override
   void initState() {
     super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _output = '加载中…');
-    _output = await _runCli(['dsh', 'sessions']);
-    if (mounted) setState(() {});
+    _future = _repo.loadAll();
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: FutureBuilder<List<SessionGroup>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final groups = snap.data ?? [];
+          if (groups.isEmpty) {
+            return Text('无会话（DSH 数据目录 ${_repo.dshHome} 无 sessions/）');
+          }
+          return ListView(
             children: [
-              const Text('DSH 会话（按工作区分组）',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.refresh),
-                tooltip: '刷新',
-                onPressed: _load,
-              ),
+              for (final g in groups) ...[
+                ListTile(
+                  leading: const Icon(Icons.folder_outlined),
+                  title: Text(g.decoded),
+                  subtitle: Text(
+                      '${g.totalSessions} 个会话 · ${_formatSize(g.totalSize)}'),
+                ),
+                for (final s in g.items)
+                  ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.forum_outlined, size: 18),
+                    title: Text(s.id),
+                    subtitle: Text(
+                        '${s.sizeLabel} · ${s.mtimeLabel}${s.cwd == null ? '' : ' · ${s.cwd}'}'),
+                  ),
+                const Divider(),
+              ],
             ],
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SingleChildScrollView(
-                child: SelectableText(_output,
-                    style: const TextStyle(fontFamily: 'monospace')),
-              ),
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
+
+  static String _formatSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
 }
 
-// ─── 技能页（制作 skill——从会话提取资产） ───
+// ─── 技能页（分析会话 → 制作技能的最小循环） ───
 
-class SkillsScreen extends StatefulWidget {
+class SkillsScreen extends StatelessWidget {
   const SkillsScreen({super.key});
 
-  @override
-  State<SkillsScreen> createState() => _SkillsScreenState();
-}
-
-class _SkillsScreenState extends State<SkillsScreen> {
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -262,5 +183,88 @@ class _SkillsScreenState extends State<SkillsScreen> {
         ],
       ),
     );
+  }
+}
+
+// ─── 智能体页（注册中心 vs 本地配置） ───
+
+class AgentsScreen extends StatefulWidget {
+  const AgentsScreen({super.key});
+
+  @override
+  State<AgentsScreen> createState() => _AgentsScreenState();
+}
+
+class _AgentsScreenState extends State<AgentsScreen> {
+  final _repo = const AgentRepository();
+  late Future<List<AgentStatus>> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = _repo.loadAll();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: FutureBuilder<List<AgentStatus>>(
+        future: _future,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final agents = snap.data ?? [];
+          if (agents.isEmpty) {
+            return const Text('无注册智能体（注册中心 agents/ 目录为空）');
+          }
+          return ListView(
+            children: [
+              for (final a in agents)
+                Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  child: ExpansionTile(
+                    leading: Icon(
+                      a.localExists ? Icons.smart_toy : Icons.error_outline,
+                      color: a.localExists ? null : Colors.orange,
+                    ),
+                    title: Text(a.name),
+                    subtitle: Text(
+                      a.localExists
+                          ? '${a.files.length} 个配置 · ${a.issueCount} 处差异'
+                          : '本地目录缺失',
+                    ),
+                    children: [
+                      for (final f in a.files)
+                        ListTile(
+                          dense: true,
+                          leading: _statusIcon(f.status),
+                          title: Text(f.name),
+                          trailing: Text(f.statusLabel),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  static Widget _statusIcon(AgentFileStatus s) {
+    return switch (s) {
+      AgentFileStatus.ok => const Icon(Icons.check_circle_outline,
+          color: Colors.green, size: 18),
+      AgentFileStatus.diff => const Icon(Icons.sync_problem,
+          color: Colors.orange, size: 18),
+      AgentFileStatus.missing => const Icon(Icons.error_outline,
+          color: Colors.red, size: 18),
+      AgentFileStatus.skip => const Icon(Icons.description_outlined,
+          color: Colors.grey, size: 18),
+      AgentFileStatus.unknown => const Icon(Icons.help_outline,
+          color: Colors.grey, size: 18),
+    };
   }
 }
