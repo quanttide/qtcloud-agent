@@ -128,7 +128,7 @@ resource "alicloud_ram_role_policy_attachment" "cdn_private_oss" {
 
 resource "alicloud_alidns_record" "studio" {
   domain_name = "quanttide.com"
-  rr          = "health"
+  rr          = "agent.cloud"
   type        = "CNAME"
   value       = alicloud_cdn_domain_new.studio.cname
   ttl         = 600
@@ -211,7 +211,7 @@ resource "alicloud_cdn_domain_config" "studio_web_https_force" {
 # DNS：studio CNAME 接入
 resource "alicloud_alidns_record" "studio_web" {
   domain_name = "quanttide.com"
-  rr          = "studio.health"
+  rr          = "studio.agent.cloud"
   type        = "CNAME"
   value       = alicloud_cdn_domain_new.studio_web.cname
   ttl         = 600
