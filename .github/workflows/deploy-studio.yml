@@ -1,0 +1,135 @@
+# 部署 studio：推送 studio/* tag（如 studio/v0.1.0-alpha.1，由 qtcloud-devops release publish 创建）时，
+# 构建 Flutter Web 产物上传到 OSS 静态网站桶，并刷新 CDN 缓存。
+#
+# 架构（对齐 qtcloud-delib 部署模式）：
+#   studio/* tag → Actions（flutter build web + ossutil cp）→ OSS 桶（静态网站模式）
+#   → 阿里云 CDN（agent.cloud.quanttide.com，泛域名证书 *.quanttide.com）→ 用户浏览器
+#
+# 触发说明：用 tag 精确匹配 studio/ 前缀，避免其他组件（provider）的 Release 误触发
+# （与 deploy-provider.yml 的 push tags: provider/** 模式一致）。
+#
+# 所需 GitHub secrets（org 级）：
+#   - ALIYUN_ACCESS_KEY_ID / ALIYUN_ACCESS_KEY_SECRET：RAM 用户 AccessKey（OSS 上传 + CDN 刷新）
+#
+# 服务地址注入（--dart-define，UI 不暴露）：provider 与认证地址均为部署配置，
+# 由 repo/org 级变量注入；未配置时回落默认值（与客户端 AppConfig 默认一致）。
+# 注意：Web 产物中地址对浏览器可见是平台固有限制（前端必须知道 API 地址），
+# 我们的安全边界是 UI 不展示、无编辑入口。
+#
+# 基础设施（manifests/terraform，已 IaC 化并全部落地）：
+#   - OSS 桶 qtcloud-agent-studio：静态网站托管 + 私有 ACL（studio-bucket.tf）
+#   - CDN 域名 + 私有回源（l2_oss_key/oss_auth）+ 根路径改写 + RAM 角色 + DNS（cdn.tf）
+#     已验证：http://agent.cloud.quanttide.com 200（Flutter Web 应用）
+#   - 可选：HTTPS 证书（复用泛域名证书 *.quanttide.com，
+#     cdn.tf certificate_config 填证书 ID 后由 terraform 管理）
+
+name: Deploy Studio
+
+on:
+  push:
+    tags:
+      - 'studio/**'
+
+concurrency:
+  group: deploy-studio
+  cancel-in-progress: false
+
+env:
+  OSS_BUCKET: qtcloud-agent-studio
+  OSS_ENDPOINT: oss-cn-hangzhou.aliyuncs.com
+  CDN_DOMAIN: studio.agent.cloud.quanttide.com
+  PROVIDER_BASE_URL: ${{ vars.PROVIDER_BASE_URL || 'https://qtcloudret-prod-lsqtuthybh.cn-hangzhou.fcapp.run' }}
+  AUTH_BASE_URL: ${{ vars.AUTH_BASE_URL || 'https://qtclouduth-prod-gnuguyxinh.cn-hangzhou.fcapp.run' }}
+
+jobs:
+  build-and-deploy:
+    name: Build Flutter Web & Deploy to OSS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 锁版本 3.44.8（与 qtcloud-delib 部署模板一致）：
+      # 项目要求 SDK 3.12.2+，旧版 Flutter 构建会失败
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.8'
+
+      - name: Setup terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Apply infrastructure (Terraform)
+        working-directory: manifests/terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET || 'quanttide-terraform-state' }}" \
+            -backend-config="key=qtcloud-agent/studio.tfstate" \
+            -backend-config="region=cn-hangzhou"
+          terraform apply -input=false -auto-approve \
+            -var region=cn-hangzhou \
+            -var environment=prod \
+            -var oss_bucket_name=qtcloud-agent-studio \
+            -var image=placeholder \
+            -target=alicloud_cdn_domain_new.studio_web \
+            -target=alicloud_cdn_domain_config.studio_web_private_back \
+            -target=alicloud_cdn_domain_config.studio_web_root_rewrite \
+            -target=alicloud_cdn_domain_config.studio_web_spa_fallback \
+            -target=alicloud_cdn_domain_config.studio_web_https_force \
+            -target=alicloud_alidns_record.studio_web
+        env:
+          ALICLOUD_ACCESS_KEY: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALICLOUD_SECRET_KEY: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+
+      - name: Build Web
+        working-directory: src/studio
+        run: |
+          flutter pub get
+          flutter build web --release \
+            --dart-define=PROVIDER_BASE_URL=${{ env.PROVIDER_BASE_URL }} \
+            --dart-define=AUTH_BASE_URL=${{ env.AUTH_BASE_URL }}
+          # 缓存破环：main.dart.js 是固定文件名（不带内容哈希），若曾以长缓存
+          # 发布，浏览器会一直用本地旧 JS（线上看起来"没有变化"）。给 bootstrap
+          # 中所有 main.dart.js 引用附加构建哈希查询串（缓存键变化 → 强制重新
+          # 拉取），配合入口文件 no-cache，任何缓存状态的浏览器都能拿到新版本。
+          VERSION=$(md5sum build/web/main.dart.js | cut -c1-10)
+          sed -i "s|\"main.dart.js\"|\"main.dart.js?v=${VERSION}\"|g" build/web/flutter_bootstrap.js
+
+      - name: Setup ossutil
+        uses: manyuanrong/setup-ossutil@v3.0
+        with:
+          endpoint: ${{ env.OSS_ENDPOINT }}
+          access-key-id: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          access-key-secret: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+
+      # 缓存策略分离（Flutter Web 部署要点）：
+      # - 入口与引导文件（index.html / bootstrap / service worker / manifest）必须 no-cache，
+      #   否则浏览器与 SW 缓存旧入口，发布后用户永远看到旧版本
+      # - main.dart.js 是固定文件名（不带内容哈希），也必须 no-cache：
+      #   内容随每次构建变化而文件名不变，长缓存会让浏览器/CDN 命中旧 JS
+      # - 仅 assets/ 下带内容哈希的文件可长缓存（文件名随内容变化）
+      - name: Upload to OSS（产物长缓存）
+        run: ossutil cp src/studio/build/web/ oss://${{ env.OSS_BUCKET }}/ -r -f --meta=Cache-Control:public,max-age=31536000
+
+      - name: Upload to OSS（入口/引导文件 no-cache）
+        run: |
+          for f in index.html flutter_bootstrap.js flutter_service_worker.js manifest.json favicon.png main.dart.js; do
+            ossutil cp "src/studio/build/web/$f" "oss://${{ env.OSS_BUCKET }}/$f" -f --meta=Cache-Control:no-cache
+          done
+
+      - name: Refresh CDN
+        run: |
+          pip install aliyun-python-sdk-cdn
+          python -c "
+          from aliyunsdkcore.client import AcsClient
+          from aliyunsdkcdn.request.v20180510.RefreshObjectCachesRequest import RefreshObjectCachesRequest
+          import os
+          cli = AcsClient(os.environ['ALIYUN_ACCESS_KEY_ID'], os.environ['ALIYUN_ACCESS_KEY_SECRET'], 'cn-hangzhou')
+          req = RefreshObjectCachesRequest()
+          req.set_ObjectPath('https://${{ env.CDN_DOMAIN }}/')
+          req.set_ObjectType('Directory')
+          cli.do_action_with_exception(req)
+          "
+        env:
+          ALIYUN_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACCESS_KEY_ID }}
+          ALIYUN_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}

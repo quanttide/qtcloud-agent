@@ -1,0 +1,7 @@
+# 复制为 terraform.tfvars 并填写实际值
+region               = "cn-hangzhou"
+environment          = "prod"
+# oss_bucket_name    = "qthealth-data"   # 如非默认可覆盖；OSS 全局唯一
+image                = "<ACR实例公网地址，控制台可见，勿入库>/quanttide/qthealth:latest"
+# jwt_public_key     = "<qtcloud-auth JWT RS256 验签公钥，base64(PEM) 单行；CI 从 JWT_PRIVATE_KEY 自动派生，本地可留空>"
+# jwt_secret         = "<JWT HS256 共享密钥，历史方案；仅公钥未配置时回落>"
