@@ -43,7 +43,7 @@ type Repository struct {
 	st store.Store
 }
 
-// NewRepository 创建仓库（st 为数据源——LocalStore 指向注册中心父目录，如 data/profile）
+// NewRepository 创建仓库（st 为数据源——LocalStore 指向注册中心目录，如 data/profile/default/agents）
 func NewRepository(st store.Store) *Repository {
 	return &Repository{st: st}
 }

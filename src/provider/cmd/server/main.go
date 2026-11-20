@@ -5,7 +5,7 @@
 //	local（默认）— 直读本地文件系统（第二大脑 git 仓库 / ~/.dsh），本地测试友好
 //	oss          — 阿里云 OSS（多端共享），凭证见 store.NewOSSStoreFromEnv
 //
-// 数据路径：注册中心（QTCLOUD_AGENT_REGISTRY，默认 data/profile）+ DSH（DSH_HOME，默认 ~/.dsh）
+// 数据路径：注册中心（QTCLOUD_AGENT_REGISTRY，默认 data/profile/default/agents）+ DSH（DSH_HOME，默认 ~/.dsh）
 package main
 
 import (
@@ -22,7 +22,7 @@ func main() {
 	registry := os.Getenv("QTCLOUD_AGENT_REGISTRY")
 	dshHome := os.Getenv("DSH_HOME")
 	if registry == "" {
-		registry = "data/profile"
+		registry = "data/profile/default/agents"
 	}
 	if dshHome == "" {
 		if h, err := os.UserHomeDir(); err == nil {
