@@ -1,7 +1,11 @@
 [package]
 name = "qtcloud-agent-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2024"
+description = "量潮智能体云命令行工具"
+authors = ["QuantTide <opensource@quanttide.com>"]
+license = "Apache-2.0"
+repository = "https://github.com/quanttide/qtcloud-agent"
 
 [[bin]]
 name = "qtcloud-agent"
